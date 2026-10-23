@@ -22,11 +22,18 @@ export function modelRequest(config,key,prompt) {
   }
   if(provider.protocol==='anthropic') return {url:base+'/messages',headers:{'x-api-key':key,'anthropic-version':'2023-06-01'},body:{model,max_tokens:7000,system,messages:[{role:'user',content:prompt}]}};
   if(provider.protocol==='gemini') return {url:base+'/models/'+encodeURIComponent(model)+':generateContent',headers:{'x-goog-api-key':key},body:{systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:9000}}};
-  return {url:base+'/chat/completions',headers:{Authorization:'Bearer '+key},body:{model,messages:[{role:'system',content:system},{role:'user',content:prompt}],max_tokens:7000}};
+  const body={model,messages:[{role:'system',content:system},{role:'user',content:prompt}],max_tokens:provider===PROVIDERS.deepseek?16000:7000};
+  if(config.provider==='deepseek'){
+    body.response_format={type:'json_object'};
+    // Translation should not wait for thousands of internal reasoning tokens.
+    if(config.task==='translation'){body.thinking={type:'disabled'};body.max_tokens=5000;}
+  }
+  return {url:base+'/chat/completions',headers:{Authorization:'Bearer '+key},body};
 }
 export async function complete(config,key,prompt,transport=requestJSON) {
   const {url,...options}=modelRequest(config,key,prompt);
-  const result=await transport(url,options);
+  const result=await transport(url,{...options,timeout:config.task==='translation'?60000:180000});
+  if(result.choices?.[0]?.finish_reason==='length' || result.stop_reason==='max_tokens' || result.candidates?.[0]?.finishReason==='MAX_TOKENS' || result.incomplete_details?.reason==='max_output_tokens')throw new AppError('模型输出达到长度上限，文章被截断。请缩短篇幅或降低模型推理强度，再继续此批次。',502);
   const output = result.output?.flatMap(x=>x.content || []).filter(x=>x.type==='output_text').map(x=>x.text).join('')
     || result.content?.filter(x=>x.type==='text').map(x=>x.text).join('')
     || result.candidates?.[0]?.content?.parts?.filter(x=>!x.thought).map(x=>x.text || '').join('')

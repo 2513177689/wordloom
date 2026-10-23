@@ -10,3 +10,23 @@
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 .snapshot-card{margin-bottom:24px}.mobile-logout{display:none}@media(max-width:800px){.mobile-logout{display:flex}}
+
+.article-paper{background:var(--readingBackground,#fffefa);color:var(--readingText,#414a40)}
+.english{color:var(--readingText,#414a40)}
+.token.target{color:var(--wordText,#77542c);background:var(--wordBackground,#f4e9d6)}
+.english::selection,.english *::selection{color:var(--selectionText,#283c31);background:var(--selectionBackground,#dce8c9)}
+.annotation{border-radius:3px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+input[type=color]{height:44px;padding:4px;cursor:pointer}
+.batch-progress p{font-size:12px;margin:7px 0;overflow-wrap:anywhere}
+.batch-progress button{margin:5px 8px 0 0;white-space:normal}
+
+.word-tools{flex-wrap:wrap}.word-tools>.row{flex-wrap:wrap}.selection-count{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px}.word-tools .selection-count input{width:76px;min-width:0;flex:none;padding:8px}
+
+.selection-help{flex-basis:100%;color:var(--muted);font-size:11px;line-height:1.8}.generation-preview{background:#e8ede3;border-radius:8px;padding:14px;color:var(--green);font-size:12px;line-height:1.8}
+
+.lookup-move{cursor:move;touch-action:none;user-select:none;font-size:10px;color:var(--muted);padding:8px 0 12px;border-bottom:1px solid var(--line);margin-bottom:12px;position:sticky;top:-24px;background:var(--paper);z-index:1}
+.lookup-resize{position:sticky;bottom:-20px;float:right;cursor:nwse-resize;touch-action:none;user-select:none;width:30px;height:30px;color:var(--muted);background:var(--paper);margin-top:8px}
+.quick-marks{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:20px;font-size:12px}.mark-swatch{width:32px;height:32px;border-radius:50%;border:1px solid #0002;font-size:12px}.mark-swatch:hover{outline:2px solid var(--green);outline-offset:2px}
+.mark-color-0{background:#fff0b3;color:#66521c}.mark-color-1{background:#dcedc8;color:#325b3b}.mark-color-2{background:#d5eafa;color:#294e70}.mark-color-3{background:#f9dce7;color:#783d53}.mark-color-4{background:#e9ddf6;color:#594271}
+
+.lookup-word.lookup-passage{font-size:16px;line-height:1.65;white-space:pre-wrap;max-height:220px}.lookup-section p{white-space:pre-wrap}

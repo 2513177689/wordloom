@@ -22,6 +22,8 @@ export function createStore(dir) {
     CREATE TABLE IF NOT EXISTS books (id TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id), name TEXT NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS entries (id TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id), book_id TEXT REFERENCES books(id) ON DELETE CASCADE, word TEXT NOT NULL, value TEXT NOT NULL, UNIQUE(book_id,word));
     CREATE TABLE IF NOT EXISTS attempts (id TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id), article_id TEXT REFERENCES articles(id), created TEXT NOT NULL, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS generations (user_id TEXT REFERENCES users(id), request_id TEXT, fingerprint TEXT NOT NULL, article_id TEXT REFERENCES articles(id), PRIMARY KEY(user_id,request_id));
+    CREATE TABLE IF NOT EXISTS annotations (id TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id), article_id TEXT REFERENCES articles(id), paragraph INTEGER, start INTEGER, end INTEGER, foreground TEXT, background TEXT, created TEXT);
     CREATE TABLE IF NOT EXISTS cache (user_id TEXT REFERENCES users(id), cache_key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(user_id,cache_key));
   `);
   return {

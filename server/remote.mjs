@@ -22,7 +22,7 @@ export async function requestJSON(address, { body, headers = {}, timeout = 90000
       res.on('end', () => {
         if (res.statusCode<200 || res.statusCode>=300) {
           const messages={401:'凭证无效或已过期，请更新后重试',403:'此凭证无权访问服务，请检查权限',429:'服务请求过于频繁或额度不足，请稍后重试'};
-          return reject(new AppError(messages[res.statusCode] || `远程服务返回 ${res.statusCode}，请核对模型名称、接口地址及账号余额`,502));
+          const error=new AppError(messages[res.statusCode] || `远程服务返回 ${res.statusCode}，请核对模型名称、接口地址及账号余额`,res.statusCode===429?429:res.statusCode===503?503:502);if(res.statusCode===429)error.retryAfter=Math.min(120,Math.max(2,Number(res.headers['retry-after'])||15));return reject(error);
         }
         try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { reject(new AppError('服务返回了非 JSON 数据',502)); }
       });
