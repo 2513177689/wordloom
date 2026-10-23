@@ -1,0 +1,89 @@
+# 词间 Wordloom
+
+把墨墨今天学过的单词放进文章，在语境中查词、翻译、收录和练习。
+
+## 开始使用
+
+需要 **Node.js 24 或更高版本**。本版使用 Node 内置模块，无需安装第三方运行依赖。
+
+```sh
+npm start
+```
+
+打开 <http://127.0.0.1:4173>：
+
+1. 创建个人账号。邮箱用于登录标识，本地试用版暂不发送验证邮件，也不支持邮件找回密码。
+2. 在「设置」填入自己的墨墨 Token，点击「测试并保存连接」。墨墨中需开启自动同步，当天打开 App 初始化学习。
+3. 添加模型服务商、模型 ID 与 API Key。先保存，再点击「测试连接」。测试会发起一次短模型请求。
+4. 在「今日学习」同步词汇，精选或手动勾选目标词，选择难度、篇幅和题材，生成文章。
+5. 阅读时点击词语或划选文字；点击「加入词本」主动收录。查词不会自动判定不会，也不会自动收录。
+
+没有模型配置时，可以先打开「阅读示例」体验阅读、段落翻译、手动收录、词本和内置填空题。示例明确标记，不会冒充真实生成结果。
+
+## 已实现
+
+- 个人账号、独立数据库归属、会话登录与退出。
+- 每位用户单独保存墨墨 Token、连接测试、断开连接、今日词表同步与每日快照；历史页面可查看最近 60 条日期记录。
+- 区分已接触／已完成／新学／首次忘记或模糊；无反馈待学词不计入已学。
+- 按目标词生成文章、保存历史、显示词形覆盖与未覆盖项。
+- 任意英文词点击、短语和句段划选、AI 语境解释、独立英英词典查询、按需段落译文。
+- 创建／重命名／删除词本，主动收录单词和短语，保存语境与来源。同词重复收录追加语境。
+- 重点标记、备注、搜索、词条移除与移动、按词本选词生成。
+- OpenAI Responses、Claude Messages、Gemini generateContent，以及 DeepSeek／通义／豆包／自定义 Chat Completions 兼容适配。
+- 按文章、翻译、出题指定模型；连接测试状态。仅支持对应参数的模型应设置高级推理选项。
+- 3–5 题语境填空、判分、保存记录、错题主动收录。
+
+## 验证情况与边界
+
+`npm test` 包含词表分类、词形覆盖、模型响应解析、私网地址拦截，以及通过 HTTP 执行的双账号完整流程测试。
+
+生成／解释／练习的集成测试使用模拟服务返回。**没有用户的模型 API Key，尚未逐家进行真实付费模型验证。** 设置页不会把仅配置过的模型标成连接成功。
+
+当前浏览器自动化预览权限未获批准，未完成实际浏览器点击和移动端视觉验收。CSS 已设置响应式布局，但不能将代码检查等同于浏览器验收。
+
+首版词典使用 Free Dictionary API 的英英释义；中文常用义和语境义由 AI 提供并明确标记，不冒充词典原文。词典服务不可用时显示状态。
+
+单篇最多选 80 个目标词，推荐 15–25；分批模式按每组 20 个目标词逐篇生成（单次最多 500 词），保存已完成文章，未覆盖的词继续保留待选。分组目前按词表顺序，不做语义聚类。当前练习为填空题；造句批改、语音、自动定时生成和墨墨内容写回尚未实现。
+
+本版适合本机或受控试用。正式公开运营前还需邮件验证与账号恢复、访问部署配置、备份恢复演练、用户数据导出／删除、浏览器验收等工作。暂未部署公网。
+
+## 数据与凭证
+
+- `.data/wordloom.sqlite` 保存账号、文章、词本、学习快照、练习及模型配置。
+- `.data/encryption.key` 是本机 AES-256-GCM 加密密钥。凭证字段加密保存，文件目录限制为当前用户可访问。
+- 密码使用 scrypt 加盐散列；会话只存散列，浏览器 Cookie 为 HttpOnly、SameSite=Strict。
+- 密钥不返回前端，不写日志，不进入文章或模型提示词。
+- 自定义接口只接受公网 HTTPS 默认端口；解析后固定目标 IP、不跟随重定向，防止访问本机和内网服务。
+- `.data/` 已加入忽略清单。备份时请在停止服务后备份整个目录，数据库与加密密钥必须一起保留。
+- 服务默认绑定 `127.0.0.1`，不对局域网或公网开放。
+
+环境变量可覆盖：`PORT`（默认 4173）、`HOST`（默认 127.0.0.1）、`DATA_DIR`（默认 .data）。通过 HTTPS 正式部署时应设置 `COOKIE_SECURE=1`，并配置可信反向代理。不要直接暴露当前开发服务。
+
+## 开发
+
+```sh
+npm run dev
+npm run check
+npm test
+```
+
+文件结构：
+
+- `public/`：原生 JavaScript 单页界面、样式和静态资源。
+- `server/app.mjs`：用户、连接、词表、文章、词本及练习接口。
+- `server/store.mjs`：SQLite 结构与凭证加密。
+- `server/models.mjs`：模型协议适配。
+- `server/remote.mjs`：受限 HTTPS 请求。
+- `server/domain.mjs`：学习分类和词形覆盖规则。
+- `tests/app.test.mjs`：核心逻辑及 HTTP 集成测试。
+
+## 接口参考
+
+- [墨墨官方 OpenAPI 规范](https://open.maimemo.com/api_bundle.yaml)
+- [OpenAI Responses](https://developers.openai.com/api/docs/guides/text)
+- [Claude API](https://platform.claude.com/docs/en/api/overview)
+- [Gemini generateContent](https://ai.google.dev/api/generate-content)
+- [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)
+- [通义千问兼容接口](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)
+- [豆包 API](https://api.volcengine.com/api-docs)
+- [Free Dictionary API](https://dictionaryapi.dev/)

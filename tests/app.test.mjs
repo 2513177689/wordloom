@@ -1,0 +1,87 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp,rm,readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createApp } from '../server/app.mjs';
+import { classify,coverage,parseJSON } from '../server/domain.mjs';
+import { modelRequest,complete,PROVIDERS } from '../server/models.mjs';
+import { publicIP } from '../server/remote.mjs';
+import { createStore } from '../server/store.mjs';
+
+test('encrypted credentials survive restart and reject tampering',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'wordloom-crypto-'));let store=createStore(dir);
+ const sealed=store.seal('a-private-token');assert.ok(!sealed.includes('a-private-token'));store.db.close();
+ store=createStore(dir);assert.equal(store.open(sealed),'a-private-token');const tampered=Buffer.from(sealed,'base64');tampered[30]^=1;assert.throws(()=>store.open(tampered.toString('base64')));store.db.close();await rm(dir,{recursive:true,force:true});
+});
+
+test('today items: no-feedback is not learned; deduplicate IDs; finished counts as touched',()=>{
+ const result=classify([{voc_id:'1',voc_spelling:'pear',is_finished:true,is_new:false,first_response:'FORGET'},{voc_id:'2',voc_spelling:'shade',is_finished:false,is_new:false,first_response:'VAGUE'},{voc_id:'3',voc_spelling:'boat',first_response:'STUDY_RESPONSE_UNSPECIFIED'},{voc_id:'1',voc_spelling:'pear',is_finished:true,first_response:'FORGET'}]);
+ assert.equal(result.length,3);assert.equal(result.filter(x=>x.touched).length,2);assert.equal(result.filter(x=>x.finished).length,1);assert.equal(result[2].response,null);
+});
+test('coverage checks boundaries, common inflections, phrases and missing words',()=>{const result=coverage('She charged for breakfast. Children were running. We look forward to it.',['charge','child','run','look forward to','break','missing']);assert.deepEqual(result.map(x=>x.covered),[true,true,true,true,false,false]);});
+test('model output parsing rejects broken responses',()=>{assert.deepEqual(parseJSON('```json\n{"ok":true}\n```'),{ok:true});assert.throws(()=>parseJSON('not json'));});
+test('private and special network targets are rejected',()=>{for(const ip of ['127.0.0.1','10.0.0.1','172.16.2.3','192.168.1.1','169.254.169.254','100.64.0.1','::1','::ffff:127.0.0.1','fc00::1','2001:db8::1'])assert.equal(publicIP(ip),false,ip);assert.equal(publicIP('8.8.8.8'),true);assert.equal(publicIP('2606:4700::1111'),true);});
+test('provider adapters use separate protocols and do not send unsupported reasoning parameters',async()=>{
+ for(const provider of Object.keys(PROVIDERS)) {const config={provider,model:'test-model',effort:'high',base:PROVIDERS[provider].base||'https://example.com/v1'};const r=modelRequest(config,'test-secret','JSON test');assert.ok(r.url.startsWith('https:'));if(provider==='openai'){assert.ok(r.url.endsWith('/responses'));assert.equal(r.body.reasoning.effort,'high');}else assert.equal(r.body.reasoning,undefined);if(provider==='anthropic')assert.equal(r.headers['x-api-key'],'test-secret');if(provider==='gemini'){assert.equal(r.headers['x-goog-api-key'],'test-secret');assert.ok(!r.url.includes('test-secret'));}}
+ const variants=[{output:[{content:[{type:'output_text',text:'{"ok":true}'}]}]},{content:[{type:'text',text:'{"ok":true}'}]},{candidates:[{content:{parts:[{thought:true,text:'reasoning'},{text:'{"ok":true}'}]}}]},{choices:[{message:{content:'{"ok":true}'}}]}];
+ for(const response of variants)assert.equal((await complete({provider:'openai',model:'test'},'key','prompt',async()=>response)).data.ok,true);
+});
+
+test('full server workflow: credentials, isolation, synchronization, generation, lookup, books and practice',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'wordloom-test-'));const calls=[];
+ const transport=async(url,options={})=>{calls.push({url,...options});
+   if(url.includes('get_study_progress'))return{success:true,data:{progress:{finished:1,total:20,study_time:120000}}};
+   if(url.includes('get_today_items'))return{success:true,data:{today_items:[{voc_spelling:'pear',voc_id:'1',is_finished:true,is_new:false,first_response:'FORGET'},{voc_spelling:'shade',voc_id:'2',is_finished:false,is_new:false,first_response:'VAGUE'},{voc_spelling:'boat',voc_id:'3',is_finished:false,first_response:'STUDY_RESPONSE_UNSPECIFIED'}]}};
+   let data;const prompt=options.body?.input||'';
+   if(prompt.includes('"ok":true'))data={ok:true};
+   else if(prompt.includes('写一篇'))data={title:'A Pear in the Shade',description:'一个小故事',paragraphs:['Clara found a pear in the shade.'],translations:['克拉拉在阴凉处发现了一只梨。'],vocabulary:[{word:'pear',form:'pear',meaning:'梨',pos:'n.'}]};
+   else if(prompt.includes('解释选中'))data={lemma:'pear',pos:'n.',meaning:'梨',commonMeanings:['梨树'],explanation:'这里指水果。',translation:'克拉拉在阴凉处发现了一只梨。',collocation:'a pear'};
+   else if(prompt.includes('生成 3–5'))data={questions:[{sentence:'Clara found a ____.',hint:'梨',answer:'pear',explanation:'水果'},{sentence:'She sat in the ____.',hint:'阴凉处',answer:'shade',explanation:'阴凉处'},{sentence:'It was a ripe ____.',hint:'梨',answer:'pear',explanation:'梨'}]};
+   else throw Error('Unexpected mock call');
+   return{output:[{content:[{type:'output_text',text:JSON.stringify(data)}]}],usage:{input_tokens:30,output_tokens:60}};
+ };
+ const {server,db}=createApp({dataDir:dir,transport});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+server.address().port;
+ t.after(async()=>{await new Promise(resolve=>server.close(resolve));db.close();await rm(dir,{recursive:true,force:true});});
+ async function request(path,method='GET',body,cookie='',extra={}) {const r=await fetch(base+'/api'+path,{method,headers:{'Content-Type':'application/json','X-Wordloom':'1',...(cookie?{Cookie:cookie}:{}),...extra},body:body===undefined?undefined:JSON.stringify(body)});return{status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]};}
+ const register=async(email)=>request('/register','POST',{email,password:'a-valid-password',name:email.split('@')[0]});
+ const home=await fetch(base);assert.equal(home.status,200);assert.match(await home.text(),/词间/);assert.ok(home.headers.get('content-security-policy').includes("script-src 'self'"));
+ const alice=await register('alice@example.com'),bob=await register('bob@example.com');assert.equal(alice.status,200);assert.equal(bob.status,200);const A=alice.cookie,B=bob.cookie;
+ assert.equal((await request('/settings')).status,401);
+ assert.equal((await request('/settings','PUT',{topic:'bad'},A,{Origin:'https://attacker.example'})).status,403);
+ assert.equal((await request('/login','POST',{email:'alice@example.com',password:'wrong-password'})).status,401);
+ const credential='mock-maimemo-token-123456';assert.equal((await request('/connection','PUT',{token:credential},A)).status,200);
+ const synced=(await request('/sync','POST',{},A)).data;assert.equal(synced.items.filter(x=>x.touched).length,2);assert.equal((await request('/today','GET',undefined,B)).data.items.length,0);
+ assert.equal((await request('/snapshots','GET',undefined,A)).data.snapshots.length,1);
+ assert.equal((await request('/snapshots/'+synced.date,'GET',undefined,B)).status,404);
+ await request('/sync','POST',{},A);assert.equal((await request('/snapshots','GET',undefined,A)).data.snapshots.length,1,'re-sync must not duplicate a day');
+ assert.equal((await request('/connection','PUT',{token:'different-memo-token'},A)).status,400);
+ const model=(await request('/models','POST',{provider:'openai',name:'Test model',model:'test-model',key:'model-secret-value'},A)).data;assert.ok(model.id);
+ assert.equal((await request('/models/'+model.id+'/test','POST',{},B)).status,404);
+ assert.equal((await request('/models/'+model.id+'/test','POST',{},A)).data.ok,true);
+ assert.equal((await request('/models','POST',{id:model.id,provider:'openai',model:'test-model',base:'https://other.example/v1'},A)).status,400);
+ await request('/settings','PUT',{articleModel:model.id},A);
+ const generated=await request('/generate','POST',{words:['pear','shade','missing']},A);assert.equal(generated.status,200);const article=generated.data;assert.equal(article.coverage.filter(x=>x.covered).length,2);
+ assert.equal((await request('/articles/'+article.id,'GET',undefined,B)).status,404);
+ const books=(await request('/books','GET',undefined,A)).data.books,book=books[0];
+ const before=(await request('/entries','GET',undefined,A)).data.entries.length;
+ const lookupBody={articleId:article.id,selection:'pear',context:article.paragraphs[0]};
+ assert.equal((await request('/explain','POST',lookupBody,A)).data.meaning,'梨');
+ assert.equal((await request('/explain','POST',lookupBody,A)).data.cached,true);
+ assert.equal((await request('/entries','GET',undefined,A)).data.entries.length,before,'lookup must not create entries');
+ const entryBody={bookId:book.id,word:'pear',meaning:'梨',sentence:article.paragraphs[0],articleId:article.id};
+ assert.equal((await request('/entries','POST',entryBody,B)).status,404);
+ const entry=(await request('/entries','POST',entryBody,A)).data;
+ assert.equal((await request('/entries','POST',{...entryBody,meaning:'另一种语境义'},A)).data.merged,true);
+ let entries=(await request('/entries','GET',undefined,A)).data.entries;assert.equal(entries.length,1);assert.equal(entries[0].examples.length,2);assert.equal(entries[0].focus,false);
+ assert.equal((await request('/entries/'+entry.id,'PATCH',{focus:true},B)).status,404);
+ await request('/entries/'+entry.id,'PATCH',{focus:true},A);assert.equal((await request('/entries','GET',undefined,A)).data.entries[0].focus,true);
+ assert.equal((await request('/books/'+book.id,'DELETE',{},B)).status,404);
+ const practice=(await request('/practice','POST',{articleId:article.id},A)).data;assert.equal(practice.questions.length,3);assert.equal(practice.questions[0].answer,undefined);
+ const attempt=(await request('/attempt','POST',{articleId:article.id,answers:{0:'pear',1:'wrong',2:'pear'}},A)).data;assert.equal(attempt.correct,2);
+ assert.equal((await request('/attempts','GET',undefined,B)).data.attempts.length,0);
+ const config=(await request('/settings','GET',undefined,A)).data;assert.ok(!JSON.stringify(config).includes('model-secret-value'));assert.ok(!JSON.stringify(config).includes(credential));
+ const stored=db.prepare('SELECT secret FROM connections').get().secret;assert.ok(!stored.includes(credential));assert.ok(!db.prepare('SELECT password FROM users LIMIT 1').get().password.includes('a-valid-password'));
+ assert.ok(calls.filter(x=>!x.url.includes('maimemo.com')).every(x=>!JSON.stringify(x).includes(credential)),'memo token must never be sent to LLM');
+ assert.equal((await request('/logout','POST',{},A)).status,200);assert.equal((await request('/settings','GET',undefined,A)).status,401);
+});
